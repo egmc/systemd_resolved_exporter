@@ -7,6 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/alecthomas/kingpin.v2"
 	"net/http"
 	"os"
 	"os/exec"
@@ -123,7 +124,11 @@ func gatherStats() map[string]float64 {
 }
 
 func main() {
-	// set up logger
+
+	var (
+		listenAddress        = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
+	)
+
 	cfg := zap.NewDevelopmentConfig()
 	cfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
 	cfg.EncoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
@@ -136,5 +141,5 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 
-	log.Fatal(http.ListenAndServe(":9924", nil))
+	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
