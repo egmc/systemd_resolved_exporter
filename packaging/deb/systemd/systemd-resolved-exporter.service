@@ -1,0 +1,15 @@
+[Unit]
+Description=Systemd Resolved Exporter Service
+After=systemd-resolved.service
+
+[Service]
+User=nobody
+Group=nogroup
+Type=simple
+Restart=always
+RestartSec=30
+ExecStart=/usr/bin/systemd_resolved_exporter
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,44 @@
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+archives:
+  - replacements:
+      linux: Linux
+      386: i386
+      amd64: x86_64
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^Merge'
+nfpms:
+  -
+    package_name: systemd-resolved-exporter
+    file_name_template: 'systemd-resolved-exporter_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}'
+    homepage: https://github.com/egmc/systemd_resolved_exporter
+    maintainer: waltz4debby@eg2mix.com
+    description: "Prometheus exporter to report systemd-resolved statistics"
+    license: MIT
+    replacements:
+      linux: Linux
+    formats:
+      - deb
+    contents:
+      - src: "packaging/deb/systemd/systemd-resolved-exporter.service"
+        dst: "/usr/lib/systemd/system/systemd-resolved-exporter.service"
+    bindir: /usr/bin
+    scripts:
+      postinstall: "packaging/scripts/postinstall"
+      postremove: "packaging/scripts/postremove"
+      preremove: "packaging/scripts/preremove"
