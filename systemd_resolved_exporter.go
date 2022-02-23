@@ -128,6 +128,8 @@ func main() {
 	var (
 		listenAddress        = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
 	)
+	kingpin.HelpFlag.Short('h')
+	kingpin.Parse()
 
 	cfg := zap.NewDevelopmentConfig()
 	cfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
@@ -140,6 +142,6 @@ func main() {
 	prometheus.MustRegister(collector)
 
 	http.Handle("/metrics", promhttp.Handler())
-
+	log.Info("start http handler on " + *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
