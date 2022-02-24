@@ -11,6 +11,7 @@ usage: systemd_resolved_exporter [<flags>]
 Flags:
   -h, --help                    Show context-sensitive help (also try --help-long and --help-man).
       --listen-address=":9924"  The address to listen on for HTTP requests.
+      --debug                   Debug mode.
 ```
 
 # sample output
