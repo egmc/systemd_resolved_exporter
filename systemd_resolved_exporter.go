@@ -5,7 +5,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"net/http"
 	"os/exec"
@@ -40,8 +39,10 @@ func (c Collector) Collect(ch chan<- prometheus.Metric) {
 
 			switch m := metric.(type) {
 			case prometheus.Gauge:
-				m.Set(v)
-				m.Collect(ch)
+				ch <- prometheus.MustNewConstMetric(
+					m.Desc(),
+					prometheus.GaugeValue,
+					v)
 			case prometheus.Counter:
 				ch <- prometheus.MustNewConstMetric(
 					m.Desc(),
@@ -111,21 +112,19 @@ func gatherStats() map[string]float64 {
 	for scanner.Scan() {
 		l := scanner.Text()
 		if statusLineRegex.Match([]byte(l)) {
-			//fmt.Println(l)
 			f := strings.Split(l, ":")
 			k := strings.TrimSpace(f[0])
 			v, _ := strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
-			log.Debug(k)
-			log.Debug(v)
 			metrics[k] = v
 		}
-
 	}
 
 	err = cmd.Wait()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Debug(metrics)
 
 	return metrics
 }
@@ -134,15 +133,18 @@ func main() {
 
 	var (
 		listenAddress = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
+		debug         = kingpin.Flag("debug", "Debug mode.").Bool()
 	)
+
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
-	cfg := zap.NewDevelopmentConfig()
-	cfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
-	cfg.EncoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
-
-	logger, _ := cfg.Build()
+	// set up logger
+	logger, _ := zap.NewProduction()
+	if *debug {
+		logger, _ = zap.NewDevelopment()
+	}
+	defer logger.Sync() //
 	log = logger.Sugar()
 
 	collector := NewCollector(namespace)
