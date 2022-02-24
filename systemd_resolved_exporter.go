@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -144,7 +145,7 @@ func main() {
 	if *debug {
 		logger, _ = zap.NewDevelopment()
 	}
-	defer logger.Sync() //
+	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
 
 	collector := NewCollector(namespace)
