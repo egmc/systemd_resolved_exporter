@@ -2,14 +2,12 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -19,9 +17,9 @@ import (
 var log *zap.SugaredLogger
 
 const (
-	namespace = "systemd_resolved"
-	resolved_command = "systemd-resolve"
-	resolved_args = "--statistics"
+	namespace       = "systemd_resolved"
+	resolvedCommand = "systemd-resolve"
+	resolvedArgs    = "--statistics"
 )
 
 type Collector struct {
@@ -39,20 +37,24 @@ func (c Collector) Collect(ch chan<- prometheus.Metric) {
 
 	for k, v := range gatherStats() {
 		if metric, exist := c.metrics[k]; exist {
-			if g, ok := metric.(prometheus.Gauge); ok {
-				g.Set(v)
-			}
-			if g, ok := metric.(prometheus.Counter); ok {
+
+			switch m := metric.(type) {
+			case prometheus.Gauge:
+				m.Set(v)
+				m.Collect(ch)
+			case prometheus.Counter:
 				ch <- prometheus.MustNewConstMetric(
-					g.Desc(),
+					m.Desc(),
 					prometheus.CounterValue,
 					v)
+			default:
+				log.Fatal("invalid metric type")
 			}
 		}
 	}
 }
 
-func NewCollector(namespace string) (*Collector, error) {
+func NewCollector(namespace string) *Collector {
 	metrics := make(map[string]prometheus.Collector)
 
 	metrics["Current Transactions"] = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -84,7 +86,7 @@ func NewCollector(namespace string) (*Collector, error) {
 	return &Collector{
 		namespace: namespace,
 		metrics:   metrics,
-	}, nil
+	}
 }
 
 func gatherStats() map[string]float64 {
@@ -93,15 +95,17 @@ func gatherStats() map[string]float64 {
 
 	statusLineRegex := regexp.MustCompile(`[a-zA-Z ]+: ?[0-9]+`)
 
-	cmd := exec.Command(resolved_command, resolved_args)
+	cmd := exec.Command(resolvedCommand, resolvedArgs)
 	stdout, err := cmd.StdoutPipe()
 
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
-	cmd.Start()
+	err = cmd.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
@@ -118,7 +122,10 @@ func gatherStats() map[string]float64 {
 
 	}
 
-	cmd.Wait()
+	err = cmd.Wait()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return metrics
 }
@@ -126,7 +133,7 @@ func gatherStats() map[string]float64 {
 func main() {
 
 	var (
-		listenAddress        = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
+		listenAddress = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
 	)
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
@@ -138,7 +145,7 @@ func main() {
 	logger, _ := cfg.Build()
 	log = logger.Sugar()
 
-	collector, _ := NewCollector(namespace)
+	collector := NewCollector(namespace)
 	prometheus.MustRegister(collector)
 
 	http.Handle("/metrics", promhttp.Handler())
