@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/godbus/dbus/v5"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -154,6 +157,25 @@ func gatherStats() map[string]float64 {
 	return metrics
 }
 
+func dbuscall() {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
+	reply, err := conn.RequestName("org.freedesktop.resolve1",
+		dbus.NameFlagDoNotQueue)
+	if err != nil {
+		panic(err)
+	}
+	if reply != dbus.RequestNameReplyPrimaryOwner {
+		_, _ = fmt.Fprintln(os.Stderr, "name already taken")
+		os.Exit(1)
+	}
+
+}
+
 func main() {
 
 	var (
@@ -172,6 +194,8 @@ func main() {
 	}
 	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
+
+	dbuscall()
 
 	collector := NewCollector(namespace, *gatherDNSSec)
 	prometheus.MustRegister(collector)
