@@ -3,15 +3,16 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
-	"gopkg.in/alecthomas/kingpin.v2"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var log *zap.SugaredLogger
@@ -56,7 +57,7 @@ func (c Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-func NewCollector(namespace string) *Collector {
+func NewCollector(namespace string, gatherDNSSec bool) *Collector {
 	metrics := make(map[string]prometheus.Collector)
 
 	metrics["Current Transactions"] = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -84,6 +85,29 @@ func NewCollector(namespace string) *Collector {
 		Name:      "cache_misses_total",
 		Help:      "Total Cache Misses",
 	})
+
+	if gatherDNSSec {
+		metrics["Secure"] = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "dnssec_secure_total",
+			Help:      "Total number of DNSSEC Verdicts Secure",
+		})
+		metrics["Insecure"] = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "dnssec_insecure_total",
+			Help:      "Total number of DNSSEC Verdicts Insecure",
+		})
+		metrics["Bogus"] = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "dnssec_bogus_total",
+			Help:      "Total number of DNSSEC Verdicts Bogus",
+		})
+		metrics["Indeterminate"] = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "dnssec_indeterminate_total",
+			Help:      "Total number of DNSSEC Verdicts Indeterminate",
+		})
+	}
 
 	return &Collector{
 		namespace: namespace,
@@ -135,6 +159,7 @@ func main() {
 	var (
 		listenAddress = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
 		debug         = kingpin.Flag("debug", "Debug mode.").Bool()
+		gatherDNSSec  = kingpin.Flag("gather-dnssec", "Collect DNSSEC statistics.").Bool()
 	)
 
 	kingpin.HelpFlag.Short('h')
@@ -148,7 +173,7 @@ func main() {
 	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
 
-	collector := NewCollector(namespace)
+	collector := NewCollector(namespace, *gatherDNSSec)
 	prometheus.MustRegister(collector)
 
 	http.Handle("/metrics", promhttp.Handler())
