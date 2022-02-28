@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -39,7 +38,7 @@ func (c Collector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c Collector) Collect(ch chan<- prometheus.Metric) {
 
-	for k, v := range gatherStats() {
+	for k, v := range gatherStatsDbus() {
 		if metric, exist := c.metrics[k]; exist {
 
 			switch m := metric.(type) {
@@ -157,23 +156,54 @@ func gatherStats() map[string]float64 {
 	return metrics
 }
 
-func dbuscall() {
-	conn, err := dbus.ConnectSessionBus()
+func gatherStatsDbus() map[string]float64 {
+	stats := make(map[string]float64)
+
+	conn, err := dbus.ConnectSystemBus()
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
 
-	reply, err := conn.RequestName("org.freedesktop.resolve1",
-		dbus.NameFlagDoNotQueue)
+	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
+
+	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
 	if err != nil {
 		panic(err)
 	}
-	if reply != dbus.RequestNameReplyPrimaryOwner {
-		_, _ = fmt.Fprintln(os.Stderr, "name already taken")
-		os.Exit(1)
-	}
+	stats["Current Cache Size"] = cacheStats[0]
+	stats["Cache Hits"] = cacheStats[1]
+	stats["Cache Misses"] = cacheStats[2]
 
+	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	if err != nil {
+		panic(err)
+	}
+	stats["Current Transactions"] = transactionStats[0]
+	stats["Total Transactions"] = transactionStats[1]
+
+	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+	if err != nil {
+		panic(err)
+	}
+	stats["Secure"] = dnssecStats[0]
+	stats["Insecure"] = dnssecStats[1]
+	stats["Bogus"] = dnssecStats[2]
+	stats["Indeterminate"] = dnssecStats[3]
+
+	return stats
+}
+
+func parseProperty(object dbus.BusObject, path string) (ret []float64, err error) {
+	variant, err := object.GetProperty(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range variant.Value().([]interface{}) {
+		i := v.(uint64)
+		ret = append(ret, float64(i))
+	}
+	return ret, err
 }
 
 func main() {
@@ -195,7 +225,7 @@ func main() {
 	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
 
-	dbuscall()
+	log.Debug(gatherStatsDbus())
 
 	collector := NewCollector(namespace, *gatherDNSSec)
 	prometheus.MustRegister(collector)
