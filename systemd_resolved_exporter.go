@@ -26,8 +26,10 @@ const (
 )
 
 type Collector struct {
-	namespace string
-	metrics   map[string]prometheus.Collector
+	namespace    string
+	metrics      map[string]prometheus.Collector
+	collectMode  string
+	gatherDNSSec bool
 }
 
 func (c Collector) Describe(ch chan<- *prometheus.Desc) {
@@ -38,7 +40,19 @@ func (c Collector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c Collector) Collect(ch chan<- prometheus.Metric) {
 
-	for k, v := range gatherStatsDbus() {
+	var stats map[string]float64
+
+	switch c.collectMode {
+	case "cli":
+		stats = gatherStats()
+	case "dbus":
+		stats = gatherStatsDbus(c.gatherDNSSec)
+	default:
+		log.Fatal("invalid collect mode:" + c.collectMode)
+	}
+	log.Debug(stats)
+
+	for k, v := range stats {
 		if metric, exist := c.metrics[k]; exist {
 
 			switch m := metric.(type) {
@@ -59,7 +73,7 @@ func (c Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-func NewCollector(namespace string, gatherDNSSec bool) *Collector {
+func NewCollector(namespace string, gatherDNSSec bool, collectMode string) *Collector {
 	metrics := make(map[string]prometheus.Collector)
 
 	metrics["Current Transactions"] = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -112,14 +126,16 @@ func NewCollector(namespace string, gatherDNSSec bool) *Collector {
 	}
 
 	return &Collector{
-		namespace: namespace,
-		metrics:   metrics,
+		namespace:    namespace,
+		metrics:      metrics,
+		collectMode:  collectMode,
+		gatherDNSSec: gatherDNSSec,
 	}
 }
 
 func gatherStats() map[string]float64 {
 
-	metrics := make(map[string]float64)
+	stats := make(map[string]float64)
 
 	statusLineRegex := regexp.MustCompile(`[a-zA-Z ]+: ?[0-9]+`)
 
@@ -142,7 +158,7 @@ func gatherStats() map[string]float64 {
 			f := strings.Split(l, ":")
 			k := strings.TrimSpace(f[0])
 			v, _ := strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
-			metrics[k] = v
+			stats[k] = v
 		}
 	}
 
@@ -151,12 +167,10 @@ func gatherStats() map[string]float64 {
 		log.Fatal(err)
 	}
 
-	log.Debug(metrics)
-
-	return metrics
+	return stats
 }
 
-func gatherStatsDbus() map[string]float64 {
+func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
 	stats := make(map[string]float64)
 
 	conn, err := dbus.ConnectSystemBus()
@@ -182,14 +196,16 @@ func gatherStatsDbus() map[string]float64 {
 	stats["Current Transactions"] = transactionStats[0]
 	stats["Total Transactions"] = transactionStats[1]
 
-	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
-	if err != nil {
-		panic(err)
+	if gatherDNSSec {
+		dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+		if err != nil {
+			panic(err)
+		}
+		stats["Secure"] = dnssecStats[0]
+		stats["Insecure"] = dnssecStats[1]
+		stats["Bogus"] = dnssecStats[2]
+		stats["Indeterminate"] = dnssecStats[3]
 	}
-	stats["Secure"] = dnssecStats[0]
-	stats["Insecure"] = dnssecStats[1]
-	stats["Bogus"] = dnssecStats[2]
-	stats["Indeterminate"] = dnssecStats[3]
 
 	return stats
 }
@@ -212,6 +228,7 @@ func main() {
 		listenAddress = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
 		debug         = kingpin.Flag("debug", "Debug mode.").Bool()
 		gatherDNSSec  = kingpin.Flag("gather-dnssec", "Collect DNSSEC statistics.").Bool()
+		collectMode   = kingpin.Flag("collect-mode", "Define how to collect stats. (dbus/cli)").Default("dbus").String()
 	)
 
 	kingpin.HelpFlag.Short('h')
@@ -225,12 +242,13 @@ func main() {
 	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
 
-	log.Debug(gatherStatsDbus())
+	//log.Debug(gatherStatsDbus())
 
-	collector := NewCollector(namespace, *gatherDNSSec)
+	collector := NewCollector(namespace, *gatherDNSSec, *collectMode)
 	prometheus.MustRegister(collector)
 
 	http.Handle("/metrics", promhttp.Handler())
+	log.Info("collect:mode " + *collectMode)
 	log.Info("start http handler on " + *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
