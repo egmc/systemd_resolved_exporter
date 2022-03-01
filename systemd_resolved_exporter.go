@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/godbus/dbus/v5"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -24,8 +26,10 @@ const (
 )
 
 type Collector struct {
-	namespace string
-	metrics   map[string]prometheus.Collector
+	namespace    string
+	metrics      map[string]prometheus.Collector
+	collectMode  string
+	gatherDNSSec bool
 }
 
 func (c Collector) Describe(ch chan<- *prometheus.Desc) {
@@ -36,7 +40,19 @@ func (c Collector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c Collector) Collect(ch chan<- prometheus.Metric) {
 
-	for k, v := range gatherStats() {
+	var stats map[string]float64
+
+	switch c.collectMode {
+	case "cli":
+		stats = gatherStats()
+	case "dbus":
+		stats = gatherStatsDbus(c.gatherDNSSec)
+	default:
+		log.Fatal("invalid collect mode:" + c.collectMode)
+	}
+	log.Debug(stats)
+
+	for k, v := range stats {
 		if metric, exist := c.metrics[k]; exist {
 
 			switch m := metric.(type) {
@@ -57,7 +73,7 @@ func (c Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-func NewCollector(namespace string, gatherDNSSec bool) *Collector {
+func NewCollector(namespace string, gatherDNSSec bool, collectMode string) *Collector {
 	metrics := make(map[string]prometheus.Collector)
 
 	metrics["Current Transactions"] = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -110,14 +126,16 @@ func NewCollector(namespace string, gatherDNSSec bool) *Collector {
 	}
 
 	return &Collector{
-		namespace: namespace,
-		metrics:   metrics,
+		namespace:    namespace,
+		metrics:      metrics,
+		collectMode:  collectMode,
+		gatherDNSSec: gatherDNSSec,
 	}
 }
 
 func gatherStats() map[string]float64 {
 
-	metrics := make(map[string]float64)
+	stats := make(map[string]float64)
 
 	statusLineRegex := regexp.MustCompile(`[a-zA-Z ]+: ?[0-9]+`)
 
@@ -140,7 +158,7 @@ func gatherStats() map[string]float64 {
 			f := strings.Split(l, ":")
 			k := strings.TrimSpace(f[0])
 			v, _ := strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
-			metrics[k] = v
+			stats[k] = v
 		}
 	}
 
@@ -149,9 +167,59 @@ func gatherStats() map[string]float64 {
 		log.Fatal(err)
 	}
 
-	log.Debug(metrics)
+	return stats
+}
 
-	return metrics
+func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
+	stats := make(map[string]float64)
+
+	conn, err := dbus.ConnectSystemBus()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
+
+	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
+	if err != nil {
+		log.Fatal(err)
+	}
+	stats["Current Cache Size"] = cacheStats[0]
+	stats["Cache Hits"] = cacheStats[1]
+	stats["Cache Misses"] = cacheStats[2]
+
+	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	if err != nil {
+		log.Fatal(err)
+	}
+	stats["Current Transactions"] = transactionStats[0]
+	stats["Total Transactions"] = transactionStats[1]
+
+	if gatherDNSSec {
+		dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+		if err != nil {
+			log.Fatal(err)
+		}
+		stats["Secure"] = dnssecStats[0]
+		stats["Insecure"] = dnssecStats[1]
+		stats["Bogus"] = dnssecStats[2]
+		stats["Indeterminate"] = dnssecStats[3]
+	}
+
+	return stats
+}
+
+func parseProperty(object dbus.BusObject, path string) (ret []float64, err error) {
+	variant, err := object.GetProperty(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range variant.Value().([]interface{}) {
+		i := v.(uint64)
+		ret = append(ret, float64(i))
+	}
+	return ret, err
 }
 
 func main() {
@@ -160,6 +228,7 @@ func main() {
 		listenAddress = kingpin.Flag("listen-address", "The address to listen on for HTTP requests.").Default(":9924").String()
 		debug         = kingpin.Flag("debug", "Debug mode.").Bool()
 		gatherDNSSec  = kingpin.Flag("gather-dnssec", "Collect DNSSEC statistics.").Bool()
+		collectMode   = kingpin.Flag("collect-mode", "Define how to collect stats. (dbus/cli)").Default("dbus").String()
 	)
 
 	kingpin.HelpFlag.Short('h')
@@ -173,10 +242,13 @@ func main() {
 	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
 
-	collector := NewCollector(namespace, *gatherDNSSec)
+	//log.Debug(gatherStatsDbus())
+
+	collector := NewCollector(namespace, *gatherDNSSec, *collectMode)
 	prometheus.MustRegister(collector)
 
 	http.Handle("/metrics", promhttp.Handler())
+	log.Info("collect:mode " + *collectMode)
 	log.Info("start http handler on " + *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
