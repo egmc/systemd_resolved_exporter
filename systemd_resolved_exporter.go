@@ -175,7 +175,7 @@ func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
 
 	conn, err := dbus.ConnectSystemBus()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer conn.Close()
 
@@ -183,7 +183,7 @@ func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
 
 	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	stats["Current Cache Size"] = cacheStats[0]
 	stats["Cache Hits"] = cacheStats[1]
@@ -191,7 +191,7 @@ func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
 
 	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	stats["Current Transactions"] = transactionStats[0]
 	stats["Total Transactions"] = transactionStats[1]
@@ -199,7 +199,7 @@ func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
 	if gatherDNSSec {
 		dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 		stats["Secure"] = dnssecStats[0]
 		stats["Insecure"] = dnssecStats[1]
