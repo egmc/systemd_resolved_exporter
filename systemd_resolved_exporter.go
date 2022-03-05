@@ -242,12 +242,22 @@ func main() {
 	defer func() { err := logger.Sync(); fmt.Printf("Error: %v\n", err) }()
 	log = logger.Sugar()
 
-	//log.Debug(gatherStatsDbus())
-
 	collector := NewCollector(namespace, *gatherDNSSec, *collectMode)
 	prometheus.MustRegister(collector)
 
 	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, err := w.Write([]byte(`<html>
+             <head><title>Systemd Resolved Exporter</title></head>
+             <body>
+             <h1>Systemd Resolved Exporter</h1>
+             <p><a href=/metrics'>Metrics</a></p>
+             </body>
+             </html>`))
+		if err != nil {
+			return
+		}
+	})
 	log.Info("collect:mode " + *collectMode)
 	log.Info("start http handler on " + *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
