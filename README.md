@@ -1,7 +1,7 @@
 Systemd Resolved Exporter
 ---
 
-Systemd Resolved Exporter exports systemd-resolved metrics provided by `systemd-resolve --statistics` command
+Systemd Resolved Exporter exports systemd-resolved metrics
 
 # usage
 
@@ -13,6 +13,7 @@ Flags:
       --listen-address=":9924"  The address to listen on for HTTP requests.
       --debug                   Debug mode.
       --gather-dnssec           Collect DNSSEC statistics.
+      --collect-mode="dbus"     Define how to collect stats. (dbus/cli)
 ```
 
 # sample output
